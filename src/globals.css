@@ -1,0 +1,743 @@
+:root {
+  --bg: #f7f7f8;
+  --surface: #ffffff;
+  --text: #1a1a1a;
+  --text-muted: #6b7280;
+  --border: #e5e7eb;
+  --accent: #3b82f6;
+  --skeleton-base: #d6d9e0;
+  --skeleton-shine: #f7f8fa;
+
+  /* カードの1行の要素間の間隔と、カテゴリーのchipの幅。狭い画面で概要を2行目に落とす際、
+     この2つのぶんだけ字下げして日付の左端に揃えるので、値を1か所から配っている
+     (.card__row と .chip と .card__summary が別々の数字を持つと静かにずれる)。
+     2.7rem = 文字2つぶん(0.8rem × 2)+ 左右のpadding(0.55rem × 2)。カテゴリー名は
+     すべて全角2文字なので、chipはどのカテゴリーでもこの幅になる。 */
+  --card-row-gap: 0.6rem;
+  --chip-width: 2.7rem;
+
+  /* 読み込み中の帯に流す光。使う側で `background-size: 200% 100%` にして横に動かす。
+     光の帯に幅を持たせて(30%〜70%)濃淡をはっきりさせる。全体をなだらかに変化させると
+     色が動いていることに気づけない。逆に絞りすぎると、帯が要素の外に出ている間
+     (背景画像は要素2つ分の幅なので周期の一部)が無地になり、止まって見える。
+     --skeleton-base / --skeleton-shine はダークモードで差し替わるが、custom property の
+     var() は使う場所で解決されるので、この定義を二重に書く必要はない。 */
+  --skeleton-gradient: linear-gradient(
+    90deg,
+    var(--skeleton-base) 0%,
+    var(--skeleton-base) 30%,
+    var(--skeleton-shine) 50%,
+    var(--skeleton-base) 70%,
+    var(--skeleton-base) 100%
+  );
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121212;
+    --surface: #1e1e1e;
+    --text: #f0f0f0;
+    --text-muted: #9ca3af;
+    --border: #2e2e2e;
+    --skeleton-base: #303036;
+    --skeleton-shine: #55555f;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* スクロールバーの場所を、出ていないページでも空けておく。
+   記録(カード一覧)は縦に長くてスクロールバーが出るが、集計は画面に収まると出ない。
+   予約しておかないと、行き来するたびに内容の幅がバーの太さぶん変わって横に飛ぶ。
+   バーを重ねて表示する環境(スマートフォンなど)では元から幅を取らないので何も起きない。 */
+html {
+  scrollbar-gutter: stable;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  /* このアプリはボタン操作が中心で、文字を選択する場面がほぼ無い(誤タップでキャレットが
+     出て煩わしいという指摘を踏まえた対応)。編集フォームの入力欄だけ下で明示的に戻す。 */
+  user-select: none;
+}
+
+input,
+textarea,
+select {
+  user-select: text;
+}
+
+/* 右端の切り替えリンク(記録 ⇄ 集計)を出すため、mainと同じ幅・同じ左右の余白に揃えて
+   いる。こうしないと、広い画面でリンクだけが画面の右端に飛んでカードから離れる。 */
+.app-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 1rem 1rem 0.5rem;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.app-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.app-header__link {
+  color: var(--accent);
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.refresh-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.refresh-button:hover,
+.refresh-button:focus-visible {
+  color: var(--accent);
+}
+
+.refresh-button:disabled {
+  cursor: default;
+}
+
+.refresh-button--spinning svg {
+  animation: refresh-spin 0.8s linear infinite;
+}
+
+@keyframes refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+main {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 0 1rem 3rem;
+}
+
+.current-status {
+  padding: 0.75rem 1rem;
+  margin: 0.5rem 0 1rem;
+  background: var(--surface);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+}
+
+.status {
+  margin: 0;
+}
+
+/* 読み込み中のプレースホルダ(CurrentStatus)。
+   テキストは行の高さを実際の表示に合わせるためだけに置き、色を透明にして隠す。
+   空要素やmin-heightで代用すると、和文が入るかどうかで使われるフォントが変わり、
+   行の高さが数pxずれて枠が伸び縮みする。
+   `visibility: hidden` ではなく `color: transparent` なのは、visibilityだと
+   擬似要素(帯)まで消えてしまうため。 */
+.status--loading {
+  position: relative;
+  color: transparent;
+  user-select: none;
+}
+
+.status--loading::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.2em;
+  bottom: 0.2em;
+  width: 12em;
+  max-width: 100%;
+  border-radius: 999px;
+  background-image: var(--skeleton-gradient);
+  /* 画像を要素2つ分の幅にして、ちょうど1周期ぶん動かす。両端が同じ色なので継ぎ目が出ない。 */
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.6s linear infinite;
+}
+
+@keyframes skeleton-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+/* 動きを減らす設定のときは帯だけ出して光らせない */
+@media (prefers-reduced-motion: reduce) {
+  .status--loading::after {
+    animation: none;
+  }
+}
+
+.status--empty {
+  color: var(--text-muted);
+}
+
+.category-buttons {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.cat-btn {
+  padding: 0.9rem 0.5rem;
+  border: 2px solid var(--cat-color, var(--border));
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+
+.cat-btn:active {
+  transform: scale(0.96);
+}
+
+.cat-btn--active {
+  background: var(--cat-color, var(--accent));
+  color: #fff;
+}
+
+.activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.75rem 1rem;
+  transition: border-color 0.2s ease;
+}
+
+.card--active {
+  border-color: var(--cat-color, var(--accent));
+}
+
+.card__row {
+  display: flex;
+  align-items: center;
+  gap: var(--card-row-gap);
+  cursor: pointer;
+}
+
+.chip {
+  /* 幅を固定しておく。全角2文字なので実際の幅と同じ値であり見た目は変わらないが、
+     概要の字下げ量がこの幅に依存するので、フォント次第で伸び縮みさせない */
+  min-width: var(--chip-width);
+  text-align: center;
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.card__date {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.card__time {
+  font-size: 0.9rem;
+  white-space: nowrap;
+  /* 数字を等幅にする。多くのUIフォントは元から等幅だが、そうでないフォントに当たると
+     「11:11」と「18:59」で幅が変わり、桁数を揃えても列がずれる(card__filler も参照) */
+  font-variant-numeric: tabular-nums;
+}
+
+/* 幅を合わせるためだけに置いてある文字(components/ActivityCard.tsx の WidthFiller)。
+   場所は取るが見えない。aria-hidden も付いているので読み上げにも出ない。 */
+.card__filler {
+  visibility: hidden;
+}
+
+/* 概要は長さが読めないので、ここだけが伸び縮みする要素になる(min-width:0 がないと
+   flexアイテムは中身より縮まないので、長い概要が右の要素を押し出してしまう)。
+   はみ出す分は「…」で切る。 */
+.card__summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 概要が無いカードでも所要時間と「+」が右端に来るようにする
+   (以前は .card__time の flex:1 が押していた) */
+.card__duration {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+/* 幅の狭い画面では1行に全部は収まらず、概要が数文字で「…」になってしまう。
+   概要だけを2行目に落とす(order で最後に回し、flex-basis:100% で必ず折り返させる)。
+   概要が空のカードは要素自体を描かないので、従来どおり1行のまま。
+   2行目でも nowrap + ellipsis は効いているので、カードが3行以上になることはない。 */
+@media (max-width: 480px) {
+  .card__row {
+    flex-wrap: wrap;
+    row-gap: 0.2rem;
+  }
+
+  .card__summary {
+    order: 1;
+    flex-basis: 100%;
+    /* chipの幅ぶん字下げして、1行目の日付(8/14)の左端に揃える。
+       左端に寄せるとchipと縦に並んでしまい、どこからが概要か読み取りにくい */
+    margin-left: calc(var(--chip-width) + var(--card-row-gap));
+  }
+}
+
+.card__insert-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+/* 「+」が出ないカードで場所だけ確保するための空要素(ActivityCard.tsxを参照) */
+.card__insert-icon--empty {
+  visibility: hidden;
+}
+
+.card__insert-icon:hover,
+.card__insert-icon:focus-visible {
+  color: var(--accent);
+  background-color: var(--bg);
+}
+
+.error-message {
+  margin: 0 0 1rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 8px;
+  background: #fee2e2;
+  color: #b91c1c;
+  font-size: 0.85rem;
+}
+
+.card__edit {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.card__edit label {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  gap: 0.25rem;
+}
+
+.card__edit select,
+.card__edit input {
+  font-size: 1rem;
+  padding: 0.5rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+
+.card__edit-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.card__edit-actions button {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.6rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.card__edit-actions button svg {
+  flex: none;
+}
+
+.card__edit-actions button[type='submit'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.card__edit-actions .danger {
+  color: #dc2626;
+  border-color: #dc2626;
+}
+
+/* 幅の狭い画面では文言がボタン内で折り返して2行になり読みにくいので、アイコンだけにする。
+   ボタン側のaria-labelが読み上げ名になるので、spanを消しても意味は失われない。
+   同時にタップ領域が痩せないよう縦の余白を足す。 */
+@media (max-width: 480px) {
+  .card__edit-actions .btn-label {
+    display: none;
+  }
+
+  .card__edit-actions button {
+    padding: 0.75rem;
+  }
+}
+
+/* ===== 集計(/dashboard) ===== */
+
+.period-tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 0.5rem 0 1rem;
+  padding: 0.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.period-tab {
+  padding: 0.45rem 1.1rem;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.period-tab--active {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* 期間を切り替えている間、前の集計を消さずに薄くする。消して「読み込み中」に
+   差し替えると、押すたびに図が消えて位置が飛ぶ */
+.stats--loading {
+  opacity: 0.5;
+  transition: opacity 0.15s ease;
+}
+
+.stats-range {
+  margin: 0 0 1.5rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  /* 行の高さを font-size から決める。既定の normal のままだと、実際に使われた
+     フォント(和文が混ざるかどうか)で1行の高さが1〜2px変わる。読み込み中の影は
+     文字を持たないので必ず欧文側の高さになり、データが届いた瞬間に下がずれる */
+  line-height: 1.5;
+}
+
+.stats-section {
+  margin-bottom: 2.25rem;
+}
+
+.stats-section h2 {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.stats-note {
+  margin: 0 0 0.9rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.bars {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+/* 名前と値は棒の上に並べる(components/BarChart.tsx の説明を参照)。
+   名前は左、値は右で、行の幅がいくつでも読める形にしてある。 */
+.bar__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-bottom: 0.3rem;
+  /* .stats-range と同じ理由で行の高さを固定する。ここは和文のカテゴリー名と欧文の
+     タグ名が同じ図に並ぶので、既定のままだと本物どうしでも行の高さが1px食い違う */
+  line-height: 1.5;
+}
+
+/* タグ名は長さが読めないので、はみ出す分は「…」で切る(値の側は必ず出す) */
+.bar__label {
+  min-width: 0;
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bar__value {
+  flex: none;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  /* 縦に並ぶ数字なので等幅にする(桁がそろわないと長さの比較が読みにくい) */
+  font-variant-numeric: tabular-nums;
+}
+
+.bar__note {
+  margin-left: 0.4rem;
+  color: var(--text-muted);
+}
+
+/* 棒の背景(トラック)は置かない。長さの基準はその図の最大値であって期間の長さではない
+   ので、右端まで伸びた枠を描くと「これで100%」という嘘になる。
+   0分の項目でも高さを保つために、この箱だけは常に置く。 */
+.bar__track {
+  height: 10px;
+}
+
+.bar__fill {
+  height: 100%;
+  /* 値の側(右端)だけ角を丸め、基点(左端)は角のまま。1分でも記録があれば見える太さにする */
+  min-width: 3px;
+  border-radius: 0 4px 4px 0;
+}
+
+/* ===== 読み込み中の影(skeleton) ===== */
+
+/* 光が流れる帯。文字の影にも棒の影にも使う */
+.skeleton {
+  border-radius: 999px;
+  background-image: var(--skeleton-gradient);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.6s linear infinite;
+}
+
+/* 一覧の影。下の2枚ほどを薄くして「この先まだ続くが、何枚あるかは言っていない」
+   という見え方にする。枚数を当てにいくと必ず外れるので、当てないための細工。
+   mask に対応しない環境ではぼけないだけで、影そのものは普通に出る。 */
+.activity-list--skeleton {
+  -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 55%, transparent 100%);
+}
+
+/* カテゴリーのchipの影。本物の .chip に全角2文字を入れたまま、文字を透明にして
+   光る帯をかぶせる(幅と高さを本物と一致させるため。components/ActivityCard.tsx を参照)。
+   .skeleton と併用するので、border-radius と background-image はあちらが持っている。 */
+.chip--skeleton {
+  color: transparent;
+  user-select: none;
+}
+
+/* 文字の影を入れる箱。**行の高さを本物と一致させる**ためだけに存在する。
+   帯そのものは 0.8em しかないので、そのまま置くと1行が本物より低くなり、届いた
+   瞬間に下の内容がせり下がる。1行が占める高さは `1lh`(=その要素のline-height)
+   なので、余りを行間(gap)と上下のpaddingに配って、帯の数 × 1lh ちょうどにする。
+   本物の文章が何行になるかは、影の帯を同じ数だけ並べて合わせる。 */
+.skeleton-lines {
+  display: flex;
+  flex-direction: column;
+  gap: calc(1lh - 0.8em);
+  padding: calc((1lh - 0.8em) / 2) 0;
+}
+
+.skeleton--line {
+  display: block;
+  flex: none;
+  width: 100%;
+  height: 0.8em;
+}
+
+/* 名前と値の影。1lh は自分のfont-sizeを基準にするので、本物(.bar__label)と同じ
+   大きさを与えないと行の高さが合わない。値(.bar__value)は少し小さいが、行の高さは
+   大きいほうで決まるので名前に合わせておけばよい */
+.bar__head .skeleton-lines {
+  font-size: 0.9rem;
+}
+
+/* 棒の影。長さをゆっくり伸び縮みさせて「まだ確定していない値」を示す。
+   .skeleton の animation を丸ごと上書きしてしまうので、光の帯もここに並べて書く
+   (片方だけ書くと、もう片方が黙って消える)。
+   幅ではなく scaleX を動かすのは、行ごとに毎フレーム再レイアウトさせないため。 */
+.bar__fill--skeleton {
+  height: 100%;
+  border-radius: 0 4px 4px 0;
+  transform-origin: left center;
+  animation:
+    skeleton-shimmer 1.6s linear infinite,
+    bar-sway 2.6s ease-in-out infinite;
+}
+
+/* 縮む側にしか動かさない(1.0を超えると棒がトラックの右端からはみ出す)。
+   行ごとの animation-delay は**負の値**にしてあり、位相だけずらして最初から動かす。 */
+@keyframes bar-sway {
+  0%,
+  100% {
+    transform: scaleX(0.72);
+  }
+  50% {
+    transform: scaleX(1);
+  }
+}
+
+/* グラフ(期間タブ+棒グラフ)の折りたたみ。開くまでは中身がDOMに存在しないので、
+   ボタンだけがここの高さを占める。既定表示は日別表なので、こちらは補助的な位置づけ */
+.daily-toggle {
+  padding: 0.6rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.daily-toggle__content {
+  margin-top: 1rem;
+}
+
+/* 列数(日付+カテゴリー5、または日付+タグ最大5)によっては狭い画面で横に収まらない
+   前提でスクロールさせる(表そのものは縮めない)。ページ本体は横にスクロールさせない
+   方針なので、はみ出しをこの内側だけに閉じ込める */
+.daily-table-wrap {
+  overflow-x: auto;
+}
+
+.daily-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.daily-table th,
+.daily-table td {
+  padding: 0.45rem 0.7rem;
+  text-align: right;
+  border-bottom: 1px solid var(--border);
+}
+
+.daily-table thead th {
+  color: var(--text-muted);
+  font-weight: 600;
+  text-align: right;
+}
+
+/* 日付列だけ左寄せ(見出し語としての列なので、他の数値列と扱いを分ける) */
+.daily-table th[scope='row'],
+.daily-table thead th:first-child {
+  text-align: left;
+}
+
+/* 縞模様(ゼブラ)。新しい色トークンは増やさず、カード等で既に使っている --surface
+   (白/暗い面の色)をそのまま流用する。表は素の --bg の上に乗るので、これだけで
+   1行おきに面が変わって見える */
+.daily-table tbody tr:nth-child(even) {
+  background: var(--surface);
+}
+
+/* 合計行(theadの2行目)。日ごとの行(tbody)とは意味が違うことを太字+背景で示す。
+   tbodyのゼブラと衝突しないよう、あえてtheadに置いてある(コンポーネント側の理由も参照)。
+   新しい色トークンは増やさず、罫線に使っている --border を面として流用する */
+.daily-table thead tr.daily-table__summary th,
+.daily-table thead tr.daily-table__summary td {
+  background: var(--border);
+  font-weight: 700;
+}
+
+/* 平均行。合計から導いた副次的な数字だという位置づけを、太字+背景無しの「軽さ」で示す。
+   カテゴリー列は色付き文字(col.color)がtdのstyleで直接指定されるため、CSS側のcolorでは
+   上書きできない(そのカテゴリーの平均だと分かるようにあえて色は残す)。斜体はその
+   インライン指定と衝突しないので、色付きセルでも「合計ではない」ことは伝わる。 */
+.daily-table thead tr.daily-table__average th,
+.daily-table thead tr.daily-table__average td {
+  background: none;
+  font-weight: 400;
+  font-style: italic;
+  color: var(--text-muted);
+}
+
+/* 動きを減らす設定のときは帯だけ出して光らせない。
+   .skeleton より後ろに置くこと(同じ強さの指定なので、前に置くと打ち消される) */
+@media (prefers-reduced-motion: reduce) {
+  .skeleton,
+  .bar__fill--skeleton {
+    animation: none;
+  }
+}
+
+/* 画面には出さず、読み上げにだけ届ける。影(skeleton)は aria-hidden なので、
+   読み込み中であることを伝える文がこれ以外に無い */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.app-footer {
+  padding: 1.5rem 1rem 2rem;
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}

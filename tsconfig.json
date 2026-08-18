@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    // test/ は node --test から直接動かすので、Nodeの解決規則に合わせて
+    // `../lib/shared/time.ts` と拡張子つきでimportする。それを許可するための設定。
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "paths": {
+      "@/*": ["./*"]
+    }
+  },
+  "include": ["src", "components", "hooks", "lib", "test", "vite.config.ts"],
+  "exclude": ["node_modules", "dist"]
+}
